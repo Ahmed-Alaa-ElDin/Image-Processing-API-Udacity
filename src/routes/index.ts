@@ -3,6 +3,9 @@ import path from "path";
 import fs from "fs";
 import bodyParser from "body-parser";
 import sharp from "sharp";
+import imagesList from "../modules/imageListGenerator";
+import processImage from "../modules/processImage";
+import { ThumbnailMetadata } from "../interfaces/ThumbnailMetadata";
 
 const router: Router = express.Router();
 
@@ -13,63 +16,49 @@ router.get("/", (req: Request, res: Response) => {
     res.redirect("/api/image-select");
 });
 
-router.get("/api/image-select", (req: Request, res: Response) => {
+router.get("/api/image-select", async (req: Request, res: Response) => {
     const directoryPath = path.join(__dirname, "..", "..", "/assets/full");
 
-    const images: string[] = [];
+    const images: string[] = await imagesList(directoryPath);
 
-    fs.readdir(directoryPath, (err, files) => {
-        if (err) {
-            return console.log("Unable to scan directory: " + err);
-        }
-        files.forEach((file) => {
-            images.push(file);
-        });
-
-        res.render("index", {
-            images,
-        });
+    res.render("index", {
+        images,
     });
 });
 
 router.post("/api/image-select", (req: Request, res: Response) => {
-    // redirect to /api/images?filename=selectedImage&width=width&height=height
     res.redirect(`/api/images?filename=${req.body.selectedImage}&width=${req.body.width}&height=${req.body.height}`);
 });
 
 router.get("/api/images", async (req: Request, res: Response) => {
     const filename: string = req.query.filename as string;
-    const width: number = Number(req.query.width);
-    const height: number = Number(req.query.height);
+    const newThumbnailMetadata: ThumbnailMetadata = {
+        width: Number(req.query.width),
+        height: Number(req.query.height),
+    };
 
     const directoryPath: string = path.join(__dirname, "..", "..", "/assets/full");
     const thumbnailPath: string = path.join(__dirname, "..", "..", "/assets/thumb");
 
-    const images: string[] = [];
-
-    const files = await fs.promises.readdir(directoryPath);
-
-    files.forEach((file) => {
-        images.push(file);
-    });
+    const images: string[] = await imagesList(directoryPath);
 
     const thumbnailExists: boolean = fs.existsSync(`${thumbnailPath}/${filename}`);
 
-    const thumbnailMetadata: sharp.Metadata | null = thumbnailExists
+    const oldThumbnailMetadata: sharp.Metadata | null = thumbnailExists
         ? await sharp(`${thumbnailPath}/${filename}`).metadata()
         : null;
 
-    if (images.includes(filename)) {
-        if (thumbnailExists && thumbnailMetadata?.width === width && thumbnailMetadata?.height === height) {
-            // return the resized image
-            res.sendFile(`${thumbnailPath}/${filename}`);
-        } else {
-            // create the resized image
-            await sharp(`${directoryPath}/${filename}`).resize(width, height).toFile(`${thumbnailPath}/${filename}`);
-            // return the resized image
-            res.sendFile(`${thumbnailPath}/${filename}`);
-        }
-    }
+    await processImage(
+        images,
+        filename,
+        directoryPath,
+        thumbnailPath,
+        thumbnailExists,
+        oldThumbnailMetadata,
+        newThumbnailMetadata,
+    );
+
+    res.sendFile(`${thumbnailPath}/${filename}`);
 });
 
 // page not found
